@@ -1,0 +1,8 @@
+lr: 0.0003
+wd: 0.05
+root: /Users/user/Documents/ESC-50-master
+fold: 1
+batch_size: 8
+num_workers: 4
+sr: 16000
+seconds: 5.0

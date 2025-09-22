@@ -1,0 +1,7 @@
+defaults:
+  - _self_
+  - model: base
+  - data: esc50_debug
+  - trainer: trainer
+  - optim: base      # ← add this line
+  - experiment: esc50_debug

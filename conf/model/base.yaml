@@ -1,0 +1,21 @@
+sample_rate: 16000
+n_scales: 3
+base_channels: 32
+d_model: 128
+hop: 32
+local_window: 64
+nhead: 4
+ff_mult: 4
+depth_per_scale: 2
+global_depth: 2
+n_classes: 10
+
+frontend:
+  name: murenn
+  # DTCWT Student-style params:
+  stride: 64
+  # counts per level are inferred from how many times each level index appears here
+  # (this example yields Q_0=1, Q_1=2, Q_2=3)
+  octaves: [0, 1, 1, 2, 2, 2]
+  Q_multiplier: 16
+  include_scale: false

@@ -1,12 +1,14 @@
-"""
 # MuReNN‑Tx
 
 A modular PyTorch implementation of MuReNN‑Tx with Hydra configs and Lightning training loops.
 
 ## Quickstart
 ```bash
-# 1) Create environment
-python -m venv .venv && source .venv/bin/activate
+# 1) Create conda environment
+conda create -n murenn-tx python=3.10 -y
+conda activate murenn-tx
+
+# (alternative: python -m venv .venv && source .venv/bin/activate)
 
 # 2) Install
 pip install -U pip
