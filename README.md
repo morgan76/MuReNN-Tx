@@ -1,4 +1,3 @@
-"""
 # MuReNN‑Tx
 
 A modular PyTorch implementation of MuReNN‑Tx with Hydra configs and Lightning training loops.
