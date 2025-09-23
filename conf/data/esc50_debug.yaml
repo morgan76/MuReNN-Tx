@@ -3,5 +3,5 @@ root: /Users/user/Documents/ESC-50-master  # contains audio/ and meta/esc50.csv
 fold: 1
 batch_size: 8
 num_workers: 4
-sample_rate: 16000
+sample_rate: 44100
 seconds: 5.0

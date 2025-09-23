@@ -1,6 +1,6 @@
-sample_rate: 16000
-n_scales: 9
-base_channels: 64
+sample_rate: 44100
+n_scales: 10
+base_channels: 32
 d_model: 128
 hop: 32
 local_window: 64
@@ -16,10 +16,10 @@ cross_q_stride: 1
 frontend:
   name: murenn
   # DTCWT Student-style params:
-  stride: 32
+  stride: 64
   # counts per level are inferred from how many times each level index appears here
   # (this example yields Q_0=1, Q_1=2, Q_2=3)
-  #octaves: [0, 0, 0,  1, 1, 1,  2, 2, 2, 3, 3, 3, 4, 4, 4,  5, 5, 5,  6, 6, 6,  7, 7, 7,  8, 8, 8]
-  octaves: [0, 1, 2, 3, 4,  5, 6, 7, 8]
+  octaves: [0, 0, 0,  1, 1, 1,  2, 2, 2, 3, 3, 3, 4, 4, 4,  5, 5, 5,  6, 6, 6,  7, 7, 7,  8, 8, 8]
+  #octaves: [-1,  9,  9,  9,  8,  8,  8,  7,  7,  7,  6,  6,  6,  5,  5,  5,  4, 4,  4,  3,  3,  3,  2,  2,  2,  1,  1,  1,  0,  0,  0,  0]
   Q_multiplier: 8
   include_scale: false
