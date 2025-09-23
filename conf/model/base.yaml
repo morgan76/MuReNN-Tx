@@ -1,7 +1,7 @@
 sample_rate: 16000
 n_scales: 9
 base_channels: 64
-d_model: 64
+d_model: 128
 hop: 32
 local_window: 64
 nhead: 4
@@ -10,13 +10,16 @@ depth_per_scale: 1
 global_depth: 1
 n_classes: 50
 local_posenc: learnable   # set to "learnable" to enable per-window pos emb
+cross_band: 1
+cross_q_stride: 1
 
 frontend:
   name: murenn
   # DTCWT Student-style params:
-  stride: 64
+  stride: 32
   # counts per level are inferred from how many times each level index appears here
   # (this example yields Q_0=1, Q_1=2, Q_2=3)
-  octaves: [0, 0, 0,  1, 1, 1,  2, 2, 2, 3, 3, 3, 4, 4, 4,  5, 5, 5,  6, 6, 6,  7, 7, 7,  8, 8, 8]
-  Q_multiplier: 16
+  #octaves: [0, 0, 0,  1, 1, 1,  2, 2, 2, 3, 3, 3, 4, 4, 4,  5, 5, 5,  6, 6, 6,  7, 7, 7,  8, 8, 8]
+  octaves: [0, 1, 2, 3, 4,  5, 6, 7, 8]
+  Q_multiplier: 8
   include_scale: false
