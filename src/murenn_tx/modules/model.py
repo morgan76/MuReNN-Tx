@@ -26,6 +26,7 @@ class MuReNNTxConfig:
     global_depth: int = 2
     n_classes: int = 50
     frontend: Any = None
+    local_posenc: str = "none"
 
 
 class MuReNNTx(nn.Module):
@@ -65,6 +66,7 @@ class MuReNNTx(nn.Module):
                             nhead=cfg.nhead,
                             dim_ff=cfg.ff_mult * cfg.d_model,
                             window=cfg.local_window,
+                            posenc=getattr(cfg, "local_posenc", "none")
                         )
                         for _ in range(cfg.depth_per_scale)
                     ]
@@ -90,12 +92,20 @@ class MuReNNTx(nn.Module):
 
     def forward(self, x: torch.Tensor):
         aux = {}
+        #print('input shape =', x.shape)
         pyramid = self.fe(x)
+        #print('pyramid shape =', [i.shape for i in pyramid])
         seqs = []
         for s, x_s in enumerate(pyramid):
             tok = self.tokenizers[s](x_s)
+            #print('tokenized s=', s, 'of shape', tok.shape)
             seqs.append(self.locals[s](tok))
+            #print('shape after local transformer =', seqs[-1].shape)
+        print([i.shape for i in seqs])
         fused = self.fuse(seqs)
+        print('fused.shape =', fused.shape)
         glob = self.global_blocks(fused)
+        print('glob.shape =', glob.shape)
         logits = self.head(self.head_norm(glob).mean(dim=1))
+        print('############## \n')
         return logits

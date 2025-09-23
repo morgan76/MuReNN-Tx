@@ -25,7 +25,9 @@ class LitMuReNNTx(LightningModule):
         x, y = batch
         logits = self(x)
         loss = torch.nn.functional.cross_entropy(logits, y)
-        self.log("train/loss", loss, prog_bar=True)
+        #self.log("train/loss", loss, prog_bar=True)
+        acc = self.acc(logits, y)
+        self.log_dict({"train/loss": loss, "train/acc": acc}, prog_bar=True)
         return loss
 
     def validation_step(self, batch, batch_idx):

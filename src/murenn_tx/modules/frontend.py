@@ -95,12 +95,16 @@ class MuReNNFrontEnd(nn.Module):
         assert in_channels == 1, "MuReNNFrontEnd expects mono input"
         self.stride = kwargs.get("stride", 64)
         Q_multiplier = kwargs.get("Q_multiplier", 16)
+        octaves = kwargs.get("octaves")
         # Same “octaves” logic as in student.py: number of filters per scale
         # Here we make a simple mapping: scale j -> base_channels at j=0 then doubles
         # If you want exact parity with student.py's Counter(octaves), pass a list instead.
-        Q_per_scale = [base_channels * (2 ** j) for j in range(n_scales)]
+        #Q_per_scale = [base_channels * (2 ** j) for j in range(n_scales)]
+        Q_per_scale = Counter(octaves)
         #Q_per_scale = [base_channels for j in range(n_scales)]
-        self.J_psi = n_scales - 1
+        #self.J_psi = n_scales - 1
+        self.J_psi = max(Q_per_scale)
+        n_scales = 1 + self.J_psi 
 
         # MuReNN’s DTCWT wrapper (1D). Some versions accept `alternate_gh`;
         # guard with try/except to support both.
@@ -113,8 +117,8 @@ class MuReNNFrontEnd(nn.Module):
         psis = []
         for j in range(1 + self.J_psi):
             kernel_size = Q_multiplier * Q_per_scale[j]
-            #stride_j = self.stride if j == 0 else max(1, self.stride // (2 ** (j - 1)))
-            stride_j = max(1, self.stride // (2 ** j))
+            stride_j = self.stride if j == 0 else max(1, self.stride // (2 ** (j - 1)))
+            #stride_j = max(1, self.stride // (2 ** j))
             psi = nn.Conv1d(
                 in_channels=1,
                 #out_channels=Q_per_scale[j],

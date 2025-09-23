@@ -19,6 +19,6 @@ class ConvTokenizer1D(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         h = self.proj(self.act(self.conv1(x)))
-        h = h[:, :, :: self.hop]
+        #h = h[:, :, :: self.hop]
         h = h.transpose(1, 2).contiguous()
         return self.norm(h)

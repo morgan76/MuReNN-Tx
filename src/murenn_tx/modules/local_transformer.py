@@ -15,9 +15,14 @@ class LocalTransformerBlock(nn.Module):
         dim_ff: int = 1024,
         dropout: float = 0.1,
         window: int = 64,
+        posenc: str = "none",
     ):
         super().__init__()
         self.window = window
+        self.posenc = posenc
+        if posenc == "learnable":
+            self.pos_emb = nn.Parameter(torch.zeros(1, window, d_model))
+            nn.init.normal_(self.pos_emb, std=0.02)
         self.layer = nn.TransformerEncoderLayer(
             d_model=d_model,
             nhead=nhead,
@@ -35,6 +40,8 @@ class LocalTransformerBlock(nn.Module):
         if pad:
             x = F.pad(x, (0, 0, 0, pad))
         x = x.view(B, -1, W, D).reshape(-1, W, D)
+        if self.posenc == "learnable":
+            x = x + self.pos_emb
         x = self.layer(x)
         x = x.view(B, -1, W, D).reshape(B, T + pad, D)
         return x[:, :T, :]
