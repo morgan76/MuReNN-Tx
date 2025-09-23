@@ -22,6 +22,7 @@ dependencies = [
 "rich",
 "pytorch_wavelets>=1.3.0",
 "PyWavelets>=1.4.1",
+"murenn>=0.3.0",
 ]
 
 [project.optional-dependencies]

@@ -85,6 +85,7 @@ class AudioDM(LightningDataModule):
             shuffle=True,
             num_workers=hp.num_workers,
             pin_memory=True,
+            persistent_workers=hp.num_workers > 0,
         )
 
     def val_dataloader(self):
@@ -95,4 +96,5 @@ class AudioDM(LightningDataModule):
             shuffle=False,
             num_workers=hp.num_workers,
             pin_memory=True,
+            persistent_workers=hp.num_workers > 0,
         )

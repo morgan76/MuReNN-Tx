@@ -7,6 +7,7 @@ from typing import Optional
 import torch
 import torchaudio
 import torchaudio.functional as AF
+import soundfile as sf
 from lightning.pytorch import LightningDataModule
 from torch.utils.data import DataLoader, Dataset
 
@@ -44,7 +45,10 @@ class ESC50Dataset(Dataset):
 
     def __getitem__(self, idx: int):
         path, label = self.items[idx]
-        x, sr = torchaudio.load(path)  # (C,T)
+        #x, sr = torchaudio.load(path)  # (C,T)
+        wav, sr = sf.read(path, dtype="float32", always_2d=True)
+        x = torch.from_numpy(wav).transpose(0, 1).contiguous()
+        #x, sr = torchaudio.load_with_torchcodec(path)
         if x.size(0) > 1:
             x = x.mean(dim=0, keepdim=True)
         else:
@@ -89,6 +93,7 @@ class ESC50DM(LightningDataModule):
             shuffle=True,
             num_workers=hp.num_workers,
             pin_memory=True,
+            persistent_workers=hp.num_workers > 0,
         )
 
     def val_dataloader(self):
@@ -99,4 +104,5 @@ class ESC50DM(LightningDataModule):
             shuffle=False,
             num_workers=hp.num_workers,
             pin_memory=True,
+            persistent_workers=hp.num_workers > 0,
         )

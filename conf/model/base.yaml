@@ -1,14 +1,14 @@
 sample_rate: 16000
-n_scales: 3
-base_channels: 32
+n_scales: 9
+base_channels: 16
 d_model: 128
 hop: 32
-local_window: 64
+local_window: 32
 nhead: 4
 ff_mult: 4
-depth_per_scale: 2
-global_depth: 2
-n_classes: 10
+depth_per_scale: 1
+global_depth: 1
+n_classes: 50
 
 frontend:
   name: murenn

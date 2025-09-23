@@ -38,6 +38,8 @@ class MuReNNTx(nn.Module):
             or (isinstance(fe_cfg, dict) and fe_cfg.get("name") == "murenn")
         ):
             self.fe = MuReNNFrontEnd(
+                base_channels=self.cfg.base_channels,
+                n_scales=self.cfg.n_scales,
                 stride=getattr(fe_cfg, "stride", 64),
                 octaves=getattr(fe_cfg, "octaves", [0, 1, 1, 2, 2, 2]),
                 Q_multiplier=getattr(fe_cfg, "Q_multiplier", 16),
@@ -51,7 +53,7 @@ class MuReNNTx(nn.Module):
         self.tokenizers = nn.ModuleList()
         self.locals = nn.ModuleList()
         for s in range(cfg.n_scales):
-            in_ch = cfg.base_channels * (2**s)
+            in_ch = cfg.base_channels #* (2**s)
             self.tokenizers.append(
                 ConvTokenizer1D(in_ch, cfg.d_model, kernel=7, hop=cfg.hop * (2**s))
             )

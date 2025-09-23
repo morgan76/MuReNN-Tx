@@ -5,7 +5,7 @@ from collections import Counter
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from pytorch_wavelets.dtcwt.transform1d import DTCWTForward as DTCWTForward1D
+from murenn import DTCWT as DTCWTForward 
 
 __all__ = ["same_padding_1d", "AntiAliasedDownsample1d", "AntiAliasedUpsample1d", "MRFrontEnd"]
 
@@ -76,84 +76,84 @@ class MRFrontEnd(nn.Module):
 
 class MuReNNFrontEnd(nn.Module):
     """
-    MuReNN-style front-end: DTCWT pyramid + learnable per-level 1D conv banks
-    applied separately to real/imag parts, then squared-magnitude pooling.
-
-    Config mirrors the WASPAA Student:
-      - stride: base stride for j=0; higher levels use stride // 2**(j-1)
-      - octaves: list of octave indices; the count per index gives #filters at that level
-      - Q_multiplier: kernel_size_j = Q_multiplier * (#filters at level j)
-    Returns a list of tensors [(B, C_j, T_j) for j = 0..J], fine -> coarse.
+    MuReNN front-end that matches the WASPAA implementation style:
+    - 1D DTCWT pyramid
+    - per-scale learnable complex convs (psis) on real/imag parts
+    - concatenates energy maps across scales
     """
-
-    def __init__(
-        self,
-        stride: int = 64,
-        octaves: list[int] = (0, 1, 1, 2, 2, 2),  # example: levels 0..2 with counts {0:1, 1:2, 2:3}
-        Q_multiplier: int = 16,
-        include_scale: bool = False,
-        # alternate_gh: bool = True,
+    def __init__(self, 
+        in_channels: int = 1,
+        base_channels: int = 32,
+        n_scales: int = 3,
+        sample_rate: int = 16000,
+        kernel_size: int = 129,
+        fmin: float = 30.0,
+        fmax_ratio: float = 0.45,
+        **kwargs,   
     ):
         super().__init__()
-        Q_ctr = Counter(octaves)
-        assert len(Q_ctr) > 0, "octaves must not be empty"
-        self.J_psi = max(Q_ctr)  # highest level index
-        # ensure every level 0..J_psi has at least one filter
-        for j in range(self.J_psi + 1):
-            assert Q_ctr[j] > 0, f"octaves must include level {j} at least once"
+        assert in_channels == 1, "MuReNNFrontEnd expects mono input"
+        self.stride = kwargs.get("stride", 64)
+        Q_multiplier = kwargs.get("Q_multiplier", 16)
+        # Same “octaves” logic as in student.py: number of filters per scale
+        # Here we make a simple mapping: scale j -> base_channels at j=0 then doubles
+        # If you want exact parity with student.py's Counter(octaves), pass a list instead.
+        Q_per_scale = [base_channels * (2 ** j) for j in range(n_scales)]
+        #Q_per_scale = [base_channels for j in range(n_scales)]
+        self.J_psi = n_scales - 1
 
-        self.stride = stride
-        self.Q_ctr = Q_ctr
+        # MuReNN’s DTCWT wrapper (1D). Some versions accept `alternate_gh`;
+        # guard with try/except to support both.
+        try:
+            self.tfm = DTCWTForward(J=1 + self.J_psi, include_scale=False, alternate_gh=True)
+        except TypeError:
+            self.tfm = DTCWTForward(J=1 + self.J_psi, include_scale=False)
 
-        # Dual-tree complex wavelet transform
-        self.tfm = DTCWTForward1D(
-            J=1 + self.J_psi,
-            complex=True,  # return complex highpasses
-            include_scale=include_scale,
-        )
-        # Per-level learnable conv banks on real/imag parts
+        # Per-scale complex conv banks (psis), matching student.py structure
         psis = []
         for j in range(1 + self.J_psi):
-            n_filters = Q_ctr[j]
-            kernel_size = Q_multiplier * n_filters
-            stride_j = stride if j == 0 else max(1, stride // (2 ** (j - 1)))
-            psis.append(
-                nn.Conv1d(
-                    in_channels=1,
-                    out_channels=n_filters,
-                    kernel_size=kernel_size,
-                    stride=stride_j,
-                    bias=False,
-                    padding=kernel_size // 2,
-                )
+            kernel_size = Q_multiplier * Q_per_scale[j]
+            #stride_j = self.stride if j == 0 else max(1, self.stride // (2 ** (j - 1)))
+            stride_j = max(1, self.stride // (2 ** j))
+            psi = nn.Conv1d(
+                in_channels=1,
+                #out_channels=Q_per_scale[j],
+                out_channels=base_channels,
+                kernel_size=kernel_size,
+                stride=stride_j,
+                bias=False,
+                padding=kernel_size // 2,
             )
-        self.psis = nn.ModuleList(psis)
+            psis.append(psi)
+        self.psis = nn.ParameterList(psis)
 
     def forward(self, x: torch.Tensor):
         # x: (B,1,T)
-        # DTCWT returns lowpass 'yl' and list of highpass complex subbands 'yh' per level
-        try:
-            yl, x_levels = self.tfm(x)  # preferred call
-        except TypeError:
-            yl, x_levels = self.tfm.forward(x)  # fallback
+        # DTCWT 1D forward
+        yl, x_levels = self.tfm(x)  # same call style as student.py
 
-        xs = []
-        N_min = None
+        Ux = []
+        N_j = None
         for j in range(1 + self.J_psi):
-            # x_levels[j]: (B, 1, T_j) complex (in pytorch_wavelets, real/imag split via .real/.imag)
-            x_level = x_levels[j].to(torch.complex64) / (2**j)
+            # Ensure complex dtype (some backends return real tensors)
+            x_level = x_levels[j].to(dtype=torch.complex64) / (2 ** j)  # (B,1,Tj) complex
+            Wx_real = self.psis[j](x_level.real)  # (B,Qj,T')
+            Wx_imag = self.psis[j](x_level.imag)  # (B,Qj,T')
+            Ux_j = Wx_real * Wx_real + Wx_imag * Wx_imag  # magnitude^2
+            Ux_j = torch.real(Ux_j)
+            if j == 0:
+                N_j = Ux_j.shape[-1]
+            else:
+                Ux_j = Ux_j[:, :, :N_j]  # align time length
+            #print(N_j, Ux_j.shape)
+            Ux.append(Ux_j)
 
-            Wx_real = self.psis[j](x_level.real)
-            Wx_imag = self.psis[j](x_level.imag)
-            Ux_j = (Wx_real * Wx_real + Wx_imag * Wx_imag).real  # (B, C_j, T'_j)
+        #Ux = torch.cat(Ux, dim=1)      # concat scales on channel axis
+        #Ux = torch.flip(Ux, dims=(-2,))  # flip so freqs go low->high like the original
+        # Return as list of scale maps to keep the rest of your pipeline unchanged:
+        # make per-scale tensors by splitting along channels
+        # (tokenizers expect list[B, C_s, T]); here we pack them as one scale
+        #print("Ux.shape", Ux.shape)
+        #return Ux
 
-            N_min = Ux_j.shape[-1] if N_min is None else min(N_min, Ux_j.shape[-1])
-            xs.append(Ux_j)
-
-        # Crop all levels to the same time length (shortest)
-        if N_min is not None:
-            xs = [u[..., :N_min] for u in xs]
-
-        # Fine -> coarse order (j=0 is finest). If you need low->high frequency flip across channels,
-        # do it per level: xs[j] = torch.flip(xs[j], dims=(-2,))
-        return xs
+        return Ux
