@@ -93,71 +93,93 @@ class MuReNNFrontEnd(nn.Module):
     ):
         super().__init__()
         assert in_channels == 1, "MuReNNFrontEnd expects mono input"
+
         self.stride = kwargs.get("stride", 64)
         Q_multiplier = kwargs.get("Q_multiplier", 16)
         octaves = kwargs.get("octaves")
-        # Same “octaves” logic as in student.py: number of filters per scale
-        # Here we make a simple mapping: scale j -> base_channels at j=0 then doubles
-        # If you want exact parity with student.py's Counter(octaves), pass a list instead.
-        #Q_per_scale = [base_channels * (2 ** j) for j in range(n_scales)]
-        Q_per_scale = Counter(octaves)
-        #Q_per_scale = [base_channels for j in range(n_scales)]
-        #self.J_psi = n_scales - 1
-        self.J_psi = max(Q_per_scale)
-        n_scales = 1 + self.J_psi 
+        if octaves is None:
+            # fallback: contiguous 0..n_scales-1
+            octaves = list(range(n_scales))
+        else:
+            octaves = list(map(int, octaves))
 
-        # MuReNN’s DTCWT wrapper (1D). Some versions accept `alternate_gh`;
-        # guard with try/except to support both.
+        # ----- FIXED: proper scale/octave bookkeeping -----
+        self.octaves = octaves
+        self.n_scales = len(octaves)                       # number of scales
+        self.J_psi = max(octaves)                          # highest octave index
+        self.n_octaves = self.J_psi + 1                    # number of octaves
+
+        # (Optional) sanity checks
+        assert min(octaves) == 0, "octave indices must start at 0"
+        assert set(octaves) == set(range(self.n_octaves)), "octave indices must be contiguous"
+
+        # ----- DTCWT pyramid depth uses #octaves, not #scales -----
         try:
-            self.tfm = DTCWTForward(J=1 + self.J_psi, include_scale=False, alternate_gh=True)
+            self.tfm = DTCWTForward(J=self.n_octaves, include_scale=False, alternate_gh=True)
         except TypeError:
-            self.tfm = DTCWTForward(J=1 + self.J_psi, include_scale=False)
+            self.tfm = DTCWTForward(J=self.n_octaves, include_scale=False)
 
-        # Per-scale complex conv banks (psis), matching student.py structure
+        # ----- Per-scale settings -----
+        # Define a per-scale Q factor from the octave index.
+        # You can change this mapping; 2**octave is a reasonable default.
+        Q_per_scale = [2 ** o for o in octaves]            # length = n_scales
+
         psis = []
-        for j in range(1 + self.J_psi):
-            kernel_size = Q_multiplier * Q_per_scale[j]
-            stride_j = self.stride if j == 0 else max(1, self.stride // (2 ** (j - 1)))
-            #stride_j = max(1, self.stride // (2 ** j))
+        for j in range(self.n_scales):
+            # kernel size grows with octave (and multiplier); enforce odd size
+            k = int(Q_multiplier * Q_per_scale[j])
+            if k < 3:
+                k = 3
+            if k % 2 == 0:
+                k += 1
+
+            # Choose stride per scale to roughly equalize time lengths across scales.
+            # Note: DTCWT reduces temporal resolution by ~2^octave;
+            # using a smaller stride at coarser scales helps keep T_j similar.
+            o_j = octaves[j]
+            stride_j = self.stride if o_j == 0 else max(1, self.stride // (2 ** (o_j - 1)))
+
             psi = nn.Conv1d(
                 in_channels=1,
-                #out_channels=Q_per_scale[j],
-                out_channels=base_channels,
-                kernel_size=kernel_size,
+                out_channels=base_channels,   # channels per scale
+                kernel_size=k,
                 stride=stride_j,
                 bias=False,
-                padding=kernel_size // 2,
+                padding=k // 2,
             )
             psis.append(psi)
-        self.psis = nn.ParameterList(psis)
+
+        # ----- FIXED: use ModuleList for modules -----
+        self.psis = nn.ModuleList(psis)
 
     def forward(self, x: torch.Tensor):
         # x: (B,1,T)
-        # DTCWT 1D forward
-        yl, x_levels = self.tfm(x)  # same call style as student.py
+        yl, x_levels = self.tfm(x)  # list/tuple of per-octave signals
 
         Ux = []
         N_j = None
-        for j in range(1 + self.J_psi):
-            # Ensure complex dtype (some backends return real tensors)
-            x_level = x_levels[j].to(dtype=torch.complex64) / (2 ** j)  # (B,1,Tj) complex
-            Wx_real = self.psis[j](x_level.real)  # (B,Qj,T')
-            Wx_imag = self.psis[j](x_level.imag)  # (B,Qj,T')
+        # We have n_octaves DTCWT levels; map them to n_scales in the order of 'octaves'
+        # If your DTCWT returns levels indexed by octave directly (0..J_psi),
+        # you can iterate per scale using its octave tag.
+        for j in range(self.n_scales):
+            o_j = j if self.n_scales == self.n_octaves else None
+            # If your 'octaves' list maps scale->octave, use it to pick the level:
+            o_j = self.octaves[j]  # <-- uses the closure/octaves from __init__
+
+            # Get the level for this octave; adapt this indexing to your DTCWT wrapper
+            x_level = x_levels[o_j].to(dtype=torch.complex64) / (2 ** o_j)  # (B,1,Tj) complex
+
+            Wx_real = self.psis[j](x_level.real)  # (B,C,T')
+            Wx_imag = self.psis[j](x_level.imag)  # (B,C,T')
             Ux_j = Wx_real * Wx_real + Wx_imag * Wx_imag  # magnitude^2
             Ux_j = torch.real(Ux_j)
+
             if j == 0:
                 N_j = Ux_j.shape[-1]
             else:
                 Ux_j = Ux_j[:, :, :N_j]  # align time length
-            #print(N_j, Ux_j.shape)
+
             Ux.append(Ux_j)
 
-        #Ux = torch.cat(Ux, dim=1)      # concat scales on channel axis
-        #Ux = torch.flip(Ux, dims=(-2,))  # flip so freqs go low->high like the original
-        # Return as list of scale maps to keep the rest of your pipeline unchanged:
-        # make per-scale tensors by splitting along channels
-        # (tokenizers expect list[B, C_s, T]); here we pack them as one scale
-        #print("Ux.shape", Ux.shape)
-        #return Ux
-
+        # Return list of per-scale tensors (B, C, T) as expected downstream
         return Ux

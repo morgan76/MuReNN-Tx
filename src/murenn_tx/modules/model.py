@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import torch
+import torch.nn.functional as F
 import torch.nn as nn
 import math
 
@@ -177,6 +178,7 @@ class MuReNNTxConfig:
     local_posenc: str = "none"
     cross_band: int | None = 1
     cross_q_stride: int = 1
+    scale_dropout_p: float = .1
 
 
 class MuReNNTx(nn.Module):
@@ -237,6 +239,10 @@ class MuReNNTx(nn.Module):
                 for _ in range(cfg.global_depth)
             ]
         )
+
+        self.in_norms = nn.ModuleList([nn.LayerNorm(cfg.d_model) for _ in range(cfg.n_scales)])
+        self.out_norms = nn.ModuleList([nn.LayerNorm(cfg.d_model) for _ in range(cfg.n_scales)])
+
         self.local_cls = nn.Parameter(torch.zeros(1,cfg.n_scales,cfg.d_model))
         nn.init.normal_(self.local_cls, std=0.02)
         self.cls = nn.Parameter(torch.zeros(1,1,cfg.d_model))
@@ -248,42 +254,83 @@ class MuReNNTx(nn.Module):
         d_s = d - d_t  # handle odd d_model robustly
 
         self.time_pe = SinusoidalPE1D(d_t, max_len=200_000)       # in-scale time
-        self.scale_pe = SinusoidalPE1D(d_s, max_len=cfg.n_scales)
+        self.scale_emb = nn.Embedding(cfg.n_scales, d_s)
+
+        self.pos_alpha = nn.Parameter(torch.tensor(1.0))
+        self.pos_mlp = nn.Sequential(
+            nn.Linear(d, d),
+            nn.GELU(),
+            nn.Linear(d, d),
+        )
 
     def forward(self, x: torch.Tensor):
         aux = {}
-        #print('input shape =', x.shape)
+
         pyramid = self.fe(x)
-        #print('pyramid shape =', [i.shape for i in pyramid])
+        assert len(pyramid) == self.cfg.n_scales
+
         seqs = []
         for s, x_s in enumerate(pyramid):
             tok = self.tokenizers[s](x_s)
+            tok = self.in_norms[s](tok)
             B, T_s, D = tok.shape
-            device = tok.device
-            dtype = tok.dtype
-            pe_t = self.time_pe(T_s).to(device=device, dtype=dtype)
-            pe_s_row = self.scale_pe(self.cfg.n_scales)[s].to(device=device, dtype=dtype)  # (d_s,)
-            pe_s = pe_s_row.unsqueeze(0).expand(T_s, -1)  # (T_s, d_s)
-            pos = torch.cat([pe_t, pe_s], dim=-1)
-            tok = tok + pos.unsqueeze(0)
+            pe_t = self.time_pe(T_s).to(tok.device, tok.dtype)              # (T_s, d_t)
+            pe_s = self.scale_emb.weight[s].unsqueeze(0).expand(T_s, -1)    # (T_s, d_s)
+            pos = torch.cat([pe_t, pe_s], dim=-1)                           # (T_s, D)
+            pos = self.pos_mlp(pos)                                         # (T_s, D)
+            tok = tok + self.pos_alpha * pos.unsqueeze(0)                   # (B, T_s, D)
 
-        #    print('tokenized s=', s, 'of shape', tok.shape)
-        #    print('local cls shape', self.local_cls.shape)
             local_cls = self.local_cls[:,s,:].expand(tok.size(0), 1, -1)
-        #    print('local cls expanded shape', local_cls.shape)
             x_cls_local = torch.cat([local_cls, tok], dim=1)
-        #    print('x_cls_local shape', x_cls_local.shape)
             tok = self.locals[s](x_cls_local)
-            seqs.append(tok[:, 0, :])
-        #    print('shape after local transformer =', seqs[-1].shape)
-        #print([i.shape for i in seqs])
-        #fused = self.fuse(seqs)
+            cls = tok[:, 0, :]
+            mean_tok = tok[:, 1:, :].mean(dim=1)
+            scale_vec = cls + mean_tok   
+            scale_vec = self.out_norms[s](scale_vec)
+            seqs.append(scale_vec)
+       
         fused = torch.stack(seqs, dim=1) 
-        #print('fused.shape =', fused.shape)
+
+        p = getattr(self.cfg, "scale_dropout_p", 0.0)
+        if self.training and p > 0:
+            B, S, D = fused.shape
+            keep = (torch.rand(B, S, device=fused.device) > p)  # True = keep
+            # ensure at least one scale kept per sample
+            none_kept = ~keep.any(dim=1)
+            if none_kept.any():
+                rand_s = torch.randint(0, S, (none_kept.sum().item(),), device=fused.device)
+                keep[none_kept, rand_s] = True
+            mask = keep.unsqueeze(-1).type_as(fused)            # (B,S,1)
+            fused = fused * mask / (1.0 - p)                    # inverted dropout
+
+
         B = fused.size(0)
         xg = torch.cat([self.cls.expand(B, 1, -1), fused], dim=1)
-        #print('xg.shape =', xg.shape)
         glob = self.global_blocks(xg)
-        #print('glob.shape =', glob.shape)
         logits = self.head(self.head_norm(glob[:, 0]))
         return logits
+    
+
+    def scale_pe_stats(self):
+        """Return quick stats on inter-scale similarity."""
+        # 1) get the scale vector for each scale
+        if hasattr(self, "scale_emb"):                              # learned embedding
+            V = self.scale_emb.weight.detach()                      # (S, d_s)
+        else:                                                       # sinusoidal rows
+            V = self.scale_pe.pe[: self.cfg.n_scales].detach()      # (S, d_s)
+
+        V = V.float().to(next(self.parameters()).device)
+
+        # 2) cosine similarity matrix
+        Vn = F.normalize(V, p=2, dim=1)
+        sims = Vn @ Vn.T                                            # (S, S)
+
+        # 3) off-diagonal summary
+        S = sims.size(0)
+        off = sims[~torch.eye(S, dtype=bool, device=sims.device)]
+        return {
+            "mean_offdiag": off.mean().item(),
+            "min_offdiag": off.min().item(),
+            "max_offdiag": off.max().item(),
+            "sims": sims.detach().cpu(),                            # optional heatmap
+        }

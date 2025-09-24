@@ -24,6 +24,7 @@ class ESC50Dataset(Dataset):
     def __init__(self, root: str, split: str, fold: int, sr: int = 16000, seconds: float = 5.0):
         assert split in {"train", "val", "test"}
         self.root = root
+        self.split = split
         self.sr = sr
         self.T = int(seconds * sr)
         meta_path = os.path.join(root, "meta", "esc50.csv")
