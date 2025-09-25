@@ -13,11 +13,12 @@ class ConvTokenizer1D(nn.Module):
         super().__init__()
         self.hop = hop
         self.conv1 = nn.Conv1d(in_ch, d_model, kernel_size=kernel, padding=same_padding_1d(kernel))
+        self.bn = nn.BatchNorm1d(d_model)
         self.act = nn.GELU()
         self.proj = nn.Conv1d(d_model, d_model, kernel_size=1)
         self.norm = nn.LayerNorm(d_model)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        h = self.proj(self.act(self.conv1(x)))
+        h = self.proj(self.act(self.bn(self.conv1(x))))
         h = h.transpose(1, 2).contiguous()
         return self.norm(h)

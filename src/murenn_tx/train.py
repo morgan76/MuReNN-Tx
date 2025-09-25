@@ -8,6 +8,7 @@ from omegaconf import DictConfig, OmegaConf
 
 from .lightning.datamodule import AudioDM
 from .lightning.esc50_datamodule import ESC50DM
+from .lightning.tinysol_datamodule import TinySOLDM
 from .lightning.model import LitMuReNNTx
 from .modules.model import MuReNNTxConfig
 
@@ -25,6 +26,15 @@ def main(cfg: DictConfig):
     # Data
     if cfg.data.get("kind", "csv") == "esc50":
         dm = ESC50DM(
+            root=cfg.data.root,
+            fold=cfg.data.fold,
+            batch_size=cfg.data.batch_size,
+            num_workers=cfg.data.num_workers,
+            sr=cfg.data.sample_rate,
+            seconds=cfg.data.seconds,
+        )
+    elif cfg.data.get("kind", "csv") == "tinysol":
+        dm = TinySOLDM(
             root=cfg.data.root,
             fold=cfg.data.fold,
             batch_size=cfg.data.batch_size,

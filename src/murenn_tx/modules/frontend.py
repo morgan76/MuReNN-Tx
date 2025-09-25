@@ -97,88 +97,188 @@ class MuReNNFrontEnd(nn.Module):
         self.stride = kwargs.get("stride", 64)
         Q_multiplier = kwargs.get("Q_multiplier", 16)
         octaves = kwargs.get("octaves")
-        if octaves is None:
-            # fallback: contiguous 0..n_scales-1
-            octaves = list(range(n_scales))
-        else:
-            octaves = list(map(int, octaves))
 
-        # ----- FIXED: proper scale/octave bookkeeping -----
         self.octaves = octaves
-        self.n_scales = len(octaves)                       # number of scales
-        self.J_psi = max(octaves)                          # highest octave index
-        self.n_octaves = self.J_psi + 1                    # number of octaves
+        Q_ctr = Counter(octaves)
+        self.J_psi = max(Q_ctr)
 
-        # (Optional) sanity checks
         assert min(octaves) == 0, "octave indices must start at 0"
-        assert set(octaves) == set(range(self.n_octaves)), "octave indices must be contiguous"
 
-        # ----- DTCWT pyramid depth uses #octaves, not #scales -----
         try:
-            self.tfm = DTCWTForward(J=self.n_octaves, include_scale=False, alternate_gh=True)
+            self.tfm = DTCWTForward(J=1+self.J_psi, alternate_gh=True, include_scale=False)
+            
         except TypeError:
-            self.tfm = DTCWTForward(J=self.n_octaves, include_scale=False)
-
-        # ----- Per-scale settings -----
-        # Define a per-scale Q factor from the octave index.
-        # You can change this mapping; 2**octave is a reasonable default.
-        Q_per_scale = [2 ** o for o in octaves]            # length = n_scales
+            self.tfm = DTCWTForward(J=1+self.J_psi, include_scale=False)
 
         psis = []
-        for j in range(self.n_scales):
+        for j in range(1+self.J_psi):
             # kernel size grows with octave (and multiplier); enforce odd size
-            k = int(Q_multiplier * Q_per_scale[j])
-            if k < 3:
-                k = 3
-            if k % 2 == 0:
-                k += 1
+            kernel_size = Q_multiplier*Q_ctr[j]
+            if kernel_size % 2 == 0:
+                kernel_size += 1
+            print("########################################## kernel size =", kernel_size)
 
-            # Choose stride per scale to roughly equalize time lengths across scales.
-            # Note: DTCWT reduces temporal resolution by ~2^octave;
-            # using a smaller stride at coarser scales helps keep T_j similar.
-            o_j = octaves[j]
-            stride_j = self.stride if o_j == 0 else max(1, self.stride // (2 ** (o_j - 1)))
+            if j == 0:
+                stride_j = self.stride
+            else:
+                stride_j = self.stride // (2**(j-1))
 
-            psi = nn.Conv1d(
+            print("########################################## stride_j =", stride_j)
+            print("########################################## out channels =", Q_ctr[j])
+            
+
+            psi = torch.nn.Conv1d(
                 in_channels=1,
-                out_channels=base_channels,   # channels per scale
-                kernel_size=k,
+                #out_channels=Q_ctr[j],
+                out_channels=base_channels,
+                kernel_size=kernel_size,
                 stride=stride_j,
                 bias=False,
-                padding=k // 2,
-            )
+                padding=kernel_size//2)
+            
             psis.append(psi)
 
         # ----- FIXED: use ModuleList for modules -----
         self.psis = nn.ModuleList(psis)
+        self.bn_per_scale = nn.ModuleList([
+            nn.BatchNorm1d(self.psis[j].out_channels) for j in range(1 + self.J_psi)
+            ])
+        
+        self.chan_drop = torch.nn.Dropout2d(p=0.2)
 
     def forward(self, x: torch.Tensor):
         # x: (B,1,T)
         yl, x_levels = self.tfm(x)  # list/tuple of per-octave signals
 
+        #print([i.shape for i in x_levels])
         Ux = []
         N_j = None
-        # We have n_octaves DTCWT levels; map them to n_scales in the order of 'octaves'
-        # If your DTCWT returns levels indexed by octave directly (0..J_psi),
-        # you can iterate per scale using its octave tag.
-        for j in range(self.n_scales):
-            o_j = j if self.n_scales == self.n_octaves else None
-            # If your 'octaves' list maps scale->octave, use it to pick the level:
-            o_j = self.octaves[j]  # <-- uses the closure/octaves from __init__
 
-            # Get the level for this octave; adapt this indexing to your DTCWT wrapper
-            x_level = x_levels[o_j].to(dtype=torch.complex64) / (2 ** o_j)  # (B,1,Tj) complex
-
-            Wx_real = self.psis[j](x_level.real)  # (B,C,T')
-            Wx_imag = self.psis[j](x_level.imag)  # (B,C,T')
-            Ux_j = Wx_real * Wx_real + Wx_imag * Wx_imag  # magnitude^2
+        for j_psi in range(1+self.J_psi):
+            x_level = x_levels[j_psi].type(torch.complex64) #/ (2**j_psi)
+            #print(f"[DBG] lvl{j_psi}_amax:", x_level.abs().max().item())
+            Wx_real = self.psis[j_psi](x_level.real)
+            Wx_imag = self.psis[j_psi](x_level.imag)
+            #print(Wx_real.shape, Wx_imag.shape)
+            Ux_j = Wx_real * Wx_real + Wx_imag * Wx_imag
             Ux_j = torch.real(Ux_j)
-
-            if j == 0:
+            #print(Ux_j.shape)
+            #Ux_j = torch.log1p(1e4 * Ux_j)
+            Ux_j = self.bn_per_scale[j_psi](Ux_j)
+            Ux_j = self.chan_drop(Ux_j.unsqueeze(2)).squeeze(2)
+            Ux_j = torch.nn.functional.gelu(Ux_j)
+            if j_psi == 0:
                 N_j = Ux_j.shape[-1]
             else:
-                Ux_j = Ux_j[:, :, :N_j]  # align time length
+                Ux_j = Ux_j[:, :, :N_j]
 
+            #print(Ux_j.mean())
+            #print(Ux_j.std())
+            #print(Ux_j.abs().max())
+            
+            Ux.append(Ux_j)
+
+        # Return list of per-scale tensors (B, C, T) as expected downstream
+        return Ux
+    
+
+
+class RawMuReNNFrontEnd(nn.Module):
+    """
+    MuReNN front-end that matches the WASPAA implementation style:
+    - 1D DTCWT pyramid
+    - per-scale learnable complex convs (psis) on real/imag parts
+    - concatenates energy maps across scales
+    """
+    def __init__(self, 
+        in_channels: int = 1,
+        base_channels: int = 32,
+        n_scales: int = 3,
+        sample_rate: int = 16000,
+        kernel_size: int = 129,
+        fmin: float = 30.0,
+        fmax_ratio: float = 0.45,
+        **kwargs,   
+    ):
+        super().__init__()
+        assert in_channels == 1, "MuReNNFrontEnd expects mono input"
+
+        self.stride = kwargs.get("stride", 64)
+        Q_multiplier = kwargs.get("Q_multiplier", 16)
+        octaves = kwargs.get("octaves")
+
+        self.octaves = octaves
+        Q_ctr = Counter(octaves)
+        self.J_psi = max(Q_ctr)
+
+        assert min(octaves) == 0, "octave indices must start at 0"
+
+        try:
+            self.tfm = DTCWTForward(J=1+self.J_psi, alternate_gh=True, include_scale=False)
+            
+        except TypeError:
+            self.tfm = DTCWTForward(J=1+self.J_psi, include_scale=False)
+
+        psis = []
+        for j in range(1+self.J_psi):
+            # kernel size grows with octave (and multiplier); enforce odd size
+            kernel_size = Q_multiplier*Q_ctr[j]
+            if kernel_size % 2 == 0:
+                kernel_size += 1
+            print("########################################## kernel size =", kernel_size)
+
+            if j == 0:
+                stride_j = self.stride
+            else:
+                stride_j = self.stride // (2**(j-1))
+
+            print("########################################## stride_j =", stride_j)
+            print("########################################## out channels =", Q_ctr[j])
+            
+
+            psi = torch.nn.Conv1d(
+                in_channels=1,
+                out_channels=Q_ctr[j],
+                kernel_size=kernel_size,
+                stride=stride_j,
+                bias=False,
+                padding=kernel_size//2)
+            
+            psis.append(psi)
+
+        # ----- FIXED: use ModuleList for modules -----
+        self.psis = nn.ModuleList(psis)
+        self.bn_per_scale = nn.ModuleList([
+            nn.BatchNorm1d(self.psis[j].out_channels) for j in range(1 + self.J_psi)
+            ])
+
+    def forward(self, x: torch.Tensor):
+        # x: (B,1,T)
+        yl, x_levels = self.tfm(x)  # list/tuple of per-octave signals
+
+        #print([i.shape for i in x_levels])
+        Ux = []
+        N_j = None
+
+        for j_psi in range(1+self.J_psi):
+            x_level = x_levels[j_psi].type(torch.complex64) #/ (2**j_psi)
+            #print(f"[DBG] lvl{j_psi}_amax:", x_level.abs().max().item())
+            Wx_real = self.psis[j_psi](x_level.real)
+            Wx_imag = self.psis[j_psi](x_level.imag)
+            Ux_j = Wx_real * Wx_real + Wx_imag * Wx_imag
+            Ux_j = torch.real(Ux_j)
+            #Ux_j = torch.log1p(1e4 * Ux_j)
+            Ux_j = self.bn_per_scale[j_psi](Ux_j)
+            Ux_j = torch.nn.functional.gelu(Ux_j)
+            if j_psi == 0:
+                N_j = Ux_j.shape[-1]
+            else:
+                Ux_j = Ux_j[:, :, :N_j]
+
+            #print(Ux_j.mean())
+            #print(Ux_j.std())
+            #print(Ux_j.abs().max())
+            
             Ux.append(Ux_j)
 
         # Return list of per-scale tensors (B, C, T) as expected downstream

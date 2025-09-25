@@ -14,6 +14,7 @@ class LitMuReNNTx(LightningModule):
         self.model = MuReNNTx(cfg)
         self.acc = MulticlassAccuracy(num_classes=cfg.n_classes)
 
+
     def forward(self, x):
         return self.model(x)
 
@@ -24,16 +25,9 @@ class LitMuReNNTx(LightningModule):
     def training_step(self, batch, batch_idx):
         x, y = batch
         logits = self(x)
-        loss = torch.nn.functional.cross_entropy(logits, y)
-        #self.log("train/loss", loss, prog_bar=True)
+        loss = torch.nn.functional.cross_entropy(logits, y) 
         acc = self.acc(logits, y)
-        self.log_dict({"train/loss": loss, "train/acc": acc}, prog_bar=True)
-        #print(self.global_step)
-        #if self.global_step % 10 == 0:
-        #    stats = self.model.scale_pe_stats()
-        #    print("scale_pe/mean_offdiag", stats["mean_offdiag"])
-        #    print("scale_pe/min_offdiag",  stats["min_offdiag"])
-        #    print("scale_pe/max_offdiag",  stats["max_offdiag"])
+        self.log_dict({"train/loss": loss, "train/acc": acc}, on_step=False, prog_bar=True, on_epoch=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -41,4 +35,4 @@ class LitMuReNNTx(LightningModule):
         logits = self(x)
         loss = torch.nn.functional.cross_entropy(logits, y)
         acc = self.acc(logits, y)
-        self.log_dict({"val/loss": loss, "val/acc": acc}, prog_bar=True)
+        self.log_dict({"val/loss": loss, "val/acc": acc}, on_step=False, prog_bar=True, on_epoch=True)
