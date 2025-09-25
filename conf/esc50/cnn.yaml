@@ -1,0 +1,4 @@
+arch: cnn
+cnn_depth: 3
+cnn_pool_stride: 2
+fe_out_to_d_model: True

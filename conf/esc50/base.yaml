@@ -1,0 +1,29 @@
+# shared across all ESC-50 runs
+n_classes: 50
+n_scales: 3
+base_channels: 32
+d_model: 32
+nhead: 4
+ff_mult: 4
+depth_per_scale: 2
+
+frontend:
+  name: murenn
+  stride: 256
+  octaves: [0, 1, 1, 2, 2, 2]
+  Q_multiplier: 16
+  include_scale: false
+
+# training defaults
+epochs: 100
+lr: 0.003
+wd: 0.05
+seed: 1337
+
+data:
+  root: "/Users/user/Documents/ESC-50-master"  
+  batch_size: 32
+  num_workers: 4
+  sample_rate: 44100
+  fold: 1
+  segment_seconds: 5.0

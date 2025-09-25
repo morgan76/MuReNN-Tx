@@ -3,12 +3,14 @@ from __future__ import annotations
 import csv
 import os
 from typing import Optional, Tuple, List, Dict
+from pathlib import Path
 
 import torch
 import torchaudio.functional as AF
 import soundfile as sf
 from lightning.pytorch import LightningDataModule
 from torch.utils.data import DataLoader, Dataset
+from murenn_tx.data.registry import register_datamodule
 
 import random
 import numpy as np
@@ -45,8 +47,15 @@ class TinySOLDataset(Dataset):
 
     def __init__(self, root: str, split: str, fold: int, sr: int = 16000, seconds: float = 3.0):
         assert split in {"train", "val", "test"}
+        if not isinstance(root, (str, os.PathLike, Path)):
+            # if someone mistakenly passes cfg, try to help once:
+            try:
+                root = root.data.root
+            except Exception:
+                raise TypeError(f"`root` must be a path, got {type(root)}")
+        root = Path(root)
+
         self.root = root
-        print(self.root)
         self.split = split
         self.sr = sr
         self.T = int(seconds * sr)
@@ -143,47 +152,51 @@ class TinySOLDataset(Dataset):
         return x, torch.tensor(label, dtype=torch.long)
     
 
-
-class TinySOLDM(LightningDataModule):
-    def __init__(
-        self,
-        root: str,
-        fold: int = 0,
-        batch_size: int = 32,
-        num_workers: int = 4,
-        sr: int = 16000,
-        seconds: float = 3.0,
-    ):
+@register_datamodule("tinysol")
+class TinySolDM(LightningDataModule):
+    def __init__(self, cfg):
         super().__init__()
-        self.save_hyperparameters()
+        self.cfg = cfg
+        d = cfg.data
+        self.root = d.root                  # <-- a PATH STRING
+        self.batch_size = d.batch_size
+        self.num_workers = d.num_workers
+        self.sr = d.sample_rate
+        self.seconds = d.segment_seconds
+        self.fold = d.fold
 
-    def setup(self, stage: Optional[str] = None):
-        hp = self.hparams
+    def setup(self, stage=None):
         self.ds_train = TinySOLDataset(
-            hp.root, split="train", fold=hp.fold, sr=hp.sr, seconds=hp.seconds
+            root=self.root,                # <-- pass a path, NOT cfg
+            split="train",
+            fold=self.fold,
+            sr=self.sr,
+            seconds=self.seconds,
         )
         self.ds_val = TinySOLDataset(
-            hp.root, split="val", fold=hp.fold, sr=hp.sr, seconds=hp.seconds
+            root=self.root,
+            split="val",
+            fold=self.fold,
+            sr=self.sr,
+            seconds=self.seconds,
         )
 
     def train_dataloader(self):
-        hp = self.hparams
         return DataLoader(
             self.ds_train,
-            batch_size=hp.batch_size,
+            batch_size=self.batch_size,
             shuffle=True,
-            num_workers=hp.num_workers,
+            num_workers=self.num_workers,
             pin_memory=True,
-            persistent_workers=hp.num_workers > 0,
+            persistent_workers=self.num_workers > 0,
         )
 
     def val_dataloader(self):
-        hp = self.hparams
         return DataLoader(
             self.ds_val,
-            batch_size=hp.batch_size,
+            batch_size=self.batch_size,
             shuffle=False,
-            num_workers=hp.num_workers,
+            num_workers=self.num_workers,
             pin_memory=True,
-            persistent_workers=hp.num_workers > 0,
+            persistent_workers=self.num_workers > 0,
         )

@@ -1,7 +1,0 @@
-defaults:
-  - _self_
-  - model: base
-  - data: tinysol_debug
-  - trainer: trainer
-  - optim: base      # ← add this line
-  - experiment: tinysol_debug

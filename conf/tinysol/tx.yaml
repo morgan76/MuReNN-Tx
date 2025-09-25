@@ -1,0 +1,3 @@
+arch: tx
+# (override anything you want for this run)
+depth_per_scale: 2

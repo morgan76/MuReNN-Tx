@@ -1,6 +1,0 @@
-train_csv: data/train.csv
-val_csv: data/val.csv
-batch_size: 8
-num_workers: 4
-sample_rate: 16000
-seconds: 1.0

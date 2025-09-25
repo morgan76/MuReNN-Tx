@@ -10,6 +10,7 @@ import torchaudio.functional as AF
 import soundfile as sf
 from lightning.pytorch import LightningDataModule
 from torch.utils.data import DataLoader, Dataset
+from murenn_tx.data.registry import register_datamodule
 
 
 class ESC50Dataset(Dataset):
@@ -64,46 +65,44 @@ class ESC50Dataset(Dataset):
             x = x[:, : self.T]
         return x, torch.tensor(label, dtype=torch.long)
 
-
+@register_datamodule("esc50")
 class ESC50DM(LightningDataModule):
-    def __init__(
-        self,
-        root: str,
-        fold: int = 1,
-        batch_size: int = 8,
-        num_workers: int = 4,
-        sr: int = 16000,
-        seconds: float = 5.0,
-    ):
+    def __init__(self, cfg):
         super().__init__()
-        self.save_hyperparameters()
+        self.cfg = cfg
+        d = cfg.data
+        # stash simple scalars (avoid passing cfg around downstream)
+        self.root = d.root
+        self.fold = getattr(d, "fold", 1)
+        self.batch_size = d.batch_size
+        self.num_workers = d.num_workers
+        self.sr = d.sample_rate
+        self.seconds = d.segment_seconds
 
     def setup(self, stage: Optional[str] = None):
-        hp = self.hparams
         self.ds_train = ESC50Dataset(
-            hp.root, split="train", fold=hp.fold, sr=hp.sr, seconds=hp.seconds
+            root=self.root, split="train", fold=self.fold, sr=self.sr, seconds=self.seconds
         )
-        # Use the held-out fold as validation (standard ESC-50 protocol)
-        self.ds_val = ESC50Dataset(hp.root, split="val", fold=hp.fold, sr=hp.sr, seconds=hp.seconds)
+        self.ds_val = ESC50Dataset(
+            root=self.root, split="val", fold=self.fold, sr=self.sr, seconds=self.seconds
+        )
 
     def train_dataloader(self):
-        hp = self.hparams
         return DataLoader(
             self.ds_train,
-            batch_size=hp.batch_size,
+            batch_size=self.batch_size,
             shuffle=True,
-            num_workers=hp.num_workers,
+            num_workers=self.num_workers,
             pin_memory=True,
-            persistent_workers=hp.num_workers > 0,
+            persistent_workers=self.num_workers > 0,
         )
 
     def val_dataloader(self):
-        hp = self.hparams
         return DataLoader(
             self.ds_val,
-            batch_size=hp.batch_size,
+            batch_size=self.batch_size,
             shuffle=False,
-            num_workers=hp.num_workers,
+            num_workers=self.num_workers,
             pin_memory=True,
-            persistent_workers=hp.num_workers > 0,
+            persistent_workers=self.num_workers > 0,
         )
