@@ -4,6 +4,7 @@ import csv
 import os
 from typing import Optional, Tuple, List, Dict
 from pathlib import Path
+from collections import Counter
 
 import torch
 import torchaudio.functional as AF
@@ -104,7 +105,8 @@ class TinySOLDataset(Dataset):
                     abbr = row.get("Instrument abbreviation") or row.get("Instrument (abbr.)") or row.get("abbr")
                     inst_full = f"{family or ''} {abbr or ''}".strip() or "Unknown"
                     
-
+                #instruments_set.add(family)
+                #items.append((relpath, family, fold_id))
                 instruments_set.add(inst_full)
                 items.append((relpath, inst_full, fold_id))
                 
@@ -112,7 +114,8 @@ class TinySOLDataset(Dataset):
         # Stable label ordering (alphabetical ensures reproducibility)
         instruments: List[str] = sorted(instruments_set)
         self.label_map: Dict[str, int] = {name: i for i, name in enumerate(instruments)}
-        print(self.label_map)
+        self.classes: List[str] = instruments
+        
         # Second pass: apply split filter and materialize items
         
         self.items: List[Tuple[str, int]] = []
@@ -123,6 +126,11 @@ class TinySOLDataset(Dataset):
                 continue
             fullpath = os.path.join(self.root, relpath)
             self.items.append((fullpath, self.label_map[inst_full]))
+
+    def class_counts(self) -> Dict[str, int]:
+        """Return {class_name: count} for this split."""
+        counts = Counter(lbl for _, lbl in self.items)
+        return {self.classes[i]: counts.get(i, 0) for i in range(len(self.classes))}
 
 
     def __len__(self):
@@ -142,12 +150,16 @@ class TinySOLDataset(Dataset):
         if sr != self.sr:
             x = AF.resample(x, orig_freq=sr, new_freq=self.sr)
         T = x.size(1)
-        if T < self.T:
+        if T <= self.T:
             x = torch.nn.functional.pad(x, (0, self.T - T))
         else:
-            
-            offset = random.choice(np.arange(T-self.T))
-            x = x[:, offset : offset + self.T]
+            if self.split == "train":
+                # inclusive range: [0, T - self.T]
+                offset = torch.randint(0, T - self.T + 1, ()).item()
+            else:
+                # val/test: deterministic center crop
+                offset = max(0, (T - self.T) // 2)
+            x = x[:, offset: offset + self.T]
         
         return x, torch.tensor(label, dtype=torch.long)
     
@@ -181,6 +193,24 @@ class TinySolDM(LightningDataModule):
             seconds=self.seconds,
         )
 
+        # ---- NEW: pretty print class distributions ----
+        self._print_split_stats("train", self.ds_train)
+        self._print_split_stats("val",   self.ds_val)
+
+
+    def _print_split_stats(self, split_name: str, ds: TinySOLDataset):
+        dist = ds.class_counts()  # {name: count}
+        total = len(ds)
+        present = sum(1 for c in dist.values() if c > 0)
+        # neat, aligned print
+        width = max(10, max(len(k) for k in dist.keys()))
+        print(f"\n[{split_name}] total={total}, classes_present={present}/{len(dist)}")
+        print(f"{'class':{width}} | count")
+        print("-" * (width + 9))
+        # sort by descending count, then alphabetically
+        for name, cnt in sorted(dist.items(), key=lambda kv: (-kv[1], kv[0])):
+            print(f"{name:{width}} | {cnt}")
+
     def train_dataloader(self):
         return DataLoader(
             self.ds_train,
@@ -200,3 +230,5 @@ class TinySolDM(LightningDataModule):
             pin_memory=True,
             persistent_workers=self.num_workers > 0,
         )
+    
+

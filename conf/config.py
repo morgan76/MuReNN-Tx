@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Optional
 
 @dataclass
 class FrontendCfg:
@@ -19,6 +19,25 @@ class DataCfg:
     fold: int = 1
 
 @dataclass
+class MelCfg:
+    n_mels: int = 64
+    n_fft: Optional[int] = None
+    hop_length: Optional[int] = None
+    win_length: Optional[int] = None
+    f_min: float = 20.0
+    f_max: Optional[float] = None
+    power: float = 2.0
+    top_db: float = 80.0
+    center: bool = True
+    pad_mode: str = "reflect"
+    # aug / preprocessing
+    specaug_p: float = 0.5
+    freq_mask_param: int = 12
+    time_mask_param: int = 24
+    rms_norm: bool = False
+    rms_target: float = 0.1
+
+@dataclass
 class MuReNNTxConfig:
     # backbone
     arch: str = "tx"  # "tx" or "cnn"
@@ -35,6 +54,7 @@ class MuReNNTxConfig:
     # nested configs
     frontend: FrontendCfg = field(default_factory=FrontendCfg)
     data: DataCfg = field(default_factory=DataCfg)
+    mel: MelCfg = field(default_factory=MelCfg)
 
     # training
     epochs: int = 100
@@ -42,9 +62,10 @@ class MuReNNTxConfig:
     wd: float = 0.05
     seed: int = 1337
     check_val_every_n_epoch: int = 1
+    dropout: float = 0.1
 
     # cnn-only knobs
-    cnn_width: int = 128
+    cnn_width: int = 32
     cnn_depth: int = 3
     cnn_pool_stride: int = 2
     fe_out_to_d_model: bool = False
@@ -55,3 +76,5 @@ class MuReNNTxConfig:
             self.frontend = FrontendCfg(**self.frontend)
         if isinstance(self.data, dict):
             self.data = DataCfg(**self.data)
+        if isinstance(self.mel, dict):                  # NEW
+            self.mel = MelCfg(**self.mel)

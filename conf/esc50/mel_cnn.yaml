@@ -1,0 +1,18 @@
+arch: mel_cnn
+
+# training
+epochs: 100
+lr: 0.0005
+wd: 0.05
+dropout: 0.1
+cnn_width: 64   # trunk width (final = 4*width)
+
+# mel settings
+mel:
+  n_mels: 64
+  # leave n_fft/hop_length None to auto-pick from sample_rate
+  specaug_p: 0.5
+  freq_mask_param: 12
+  time_mask_param: 24
+  rms_norm: true
+  rms_target: 0.1

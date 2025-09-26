@@ -3,6 +3,7 @@ import torch.nn as nn
 from .registry import register_model
 from murenn_tx.modules.frontend import MuReNNFrontEnd, MRFrontEnd
 from murenn_tx.utils.pe import SinusoidalPE1D
+from murenn_tx.modules.tokenizers import ConvTokenizer1D
 from collections import Counter
 
 
@@ -33,7 +34,8 @@ class MuReNNTx(nn.Module):
             self.fe = MRFrontEnd(in_channels=1, base_channels=cfg.base_channels, n_scales=cfg.n_scales)
 
         self.locals = nn.ModuleList()
-        
+        self.tokenizers = nn.ModuleList()
+        #channels = [32,32,32, 32, 32, 32,16,16,16]
         octaves = Counter(_get(fe_cfg, "octaves"))
         assert len(octaves) == cfg.n_scales
 
@@ -50,13 +52,23 @@ class MuReNNTx(nn.Module):
                 ) for _ in range(cfg.depth_per_scale)
             ]))
 
+            self.tokenizers.append(ConvTokenizer1D(in_ch=cfg.base_channels, d_model=cfg.d_model))
+            #self.tokenizers.append(ConvTokenizer1D(in_ch=channels[s], d_model=cfg.d_model))
+            
+
         self.in_norms  = nn.ModuleList([nn.LayerNorm(cfg.d_model) for _ in range(cfg.n_scales)])
         self.out_norms = nn.ModuleList([nn.LayerNorm(cfg.d_model) for _ in range(cfg.n_scales)])
 
         self.local_cls = nn.Parameter(torch.zeros(1, cfg.n_scales, cfg.d_model))
         nn.init.normal_(self.local_cls, std=0.02)
 
-        self.head = nn.Linear(cfg.d_model * cfg.n_scales, cfg.n_classes)
+        #self.head = nn.Linear(cfg.d_model * cfg.n_scales, cfg.n_classes)
+        self.head = nn.Sequential(
+            nn.Linear(cfg.d_model * cfg.n_scales, cfg.d_model),
+            nn.GELU(),
+            nn.Dropout(.1),
+            nn.Linear(cfg.d_model, cfg.n_classes)
+        )
         self.time_pe = SinusoidalPE1D(cfg.d_model, max_len=200_000)
 
     def forward(self, x):
@@ -65,10 +77,12 @@ class MuReNNTx(nn.Module):
 
         seqs = []
         for s, x_s in enumerate(pyramid):
-            tok = x_s.permute(0, 2, 1)              
+            #print("x_s.shape", x_s.shape)
+            tok = self.tokenizers[s](x_s) 
+            #print("tok.shape", tok.shape)          
             tok = self.in_norms[s](tok)
             B, T_s, _ = tok.shape
-            tok = tok + self.time_pe(T_s).to(tok.device, tok.dtype)
+            #tok = tok + self.time_pe(T_s).to(tok.device, tok.dtype)
 
             local_cls = self.local_cls[:, s, :].expand(B, 1, -1)
             tok = torch.cat([local_cls, tok], dim=1)

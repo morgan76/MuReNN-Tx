@@ -58,7 +58,7 @@ class MuReNNCNN(nn.Module):
 
         # assume FE outputs per-scale channel count == cfg.d_model (or map to it)
         self.per_scale = nn.ModuleList([
-            ScaleCNN(in_ch=cfg.d_model, width=cfg.d_model,
+            ScaleCNN(in_ch=cfg.base_channels, width=cfg.d_model,
                      depth=getattr(cfg, "cnn_depth", 3),
                      pool_stride=getattr(cfg, "cnn_pool_stride", 2))
             for _ in range(cfg.n_scales)
@@ -88,7 +88,6 @@ class MuReNNCNN(nn.Module):
 
         pooled = []
         for s, x_s in enumerate(pyramid):
-        
             if self.projects is not None:
                 x_s = self.projects[s](x_s)
             per_scale = self.per_scale[s](x_s)
