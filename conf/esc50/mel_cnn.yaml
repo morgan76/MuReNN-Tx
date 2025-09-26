@@ -1,11 +1,10 @@
 arch: mel_cnn
 
-# training
-epochs: 100
+epochs: 120
 lr: 0.0005
 wd: 0.05
 dropout: 0.1
-cnn_width: 64   # trunk width (final = 4*width)
+cnn_width: 16
 
 # mel settings
 mel:
@@ -14,5 +13,5 @@ mel:
   specaug_p: 0.5
   freq_mask_param: 12
   time_mask_param: 24
-  rms_norm: true
+  rms_norm: false
   rms_target: 0.1

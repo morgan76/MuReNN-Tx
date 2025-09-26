@@ -1,0 +1,19 @@
+arch: murenn2dcnn
+
+epochs: 120
+lr: 0.0005
+wd: 0.05
+dropout: 0.1
+cnn_width: 16
+
+mel:
+  n_mels: 96                 # TinySOL at 44.1k: a few more bins can help
+  n_fft: 2048
+  hop_length: 512
+  f_min: 20.0
+  f_max: 22050.0
+  specaug_p: 0.4
+  freq_mask_param: 16
+  time_mask_param: 32
+  rms_norm: false
+  rms_target: 0.1

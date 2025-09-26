@@ -1,6 +1,6 @@
 arch: cnn
-cnn_width: 128
-cnn_depth: 3
+cnn_width: 64
+cnn_depth: 5
 cnn_pool_stride: 2
 fe_out_to_d_model: false
 fe_ch_per_scale: 128

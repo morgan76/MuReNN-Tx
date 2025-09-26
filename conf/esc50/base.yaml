@@ -1,23 +1,24 @@
 # shared across all ESC-50 runs
 n_classes: 50
-n_scales: 6
-base_channels: 4
-d_model: 64
-nhead: 8
+n_scales: 8
+base_channels: 1
+d_model: 32
+nhead: 2
 ff_mult: 4
 depth_per_scale: 2
 
 frontend:
   name: murenn
-  stride: 256
-  octaves: [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5]
+  stride: 512
+  octaves: [0, 1, 2, 3, 4, 5, 6, 7]
   Q_multiplier: 16
   include_scale: false
+  sample_rate: 44100
 
 # training defaults
 epochs: 100
 lr: 0.0005
-wd: 0.005
+wd: 0.05
 seed: 1337
 
 data:

@@ -21,35 +21,35 @@ python -m murenn_tx.train +experiment=esc50_debug
 
 ## Project layout
 ```
-murenn-tx/
-├─ pyproject.toml
+MuReNN-Tx/
+├─ pyproject.toml # package metadata (murenn_tx), deps
 ├─ README.md
-├─ Makefile
-├─ .pre-commit-config.yaml
-├─ src/
-│ └─ murenn_tx/
-│ ├─ __init__.py
-│ ├─ modules/
-│ │ ├─ frontend.py
-│ │ ├─ tokenizers.py
-│ │ ├─ local_transformer.py
-│ │ ├─ fusion.py
-│ │ └─ model.py
-│ └─ lightning/
-│ ├─ datamodule.py
-│ └─ model.py
-│ └─ train.py
+├─ .gitignore
+├─ .gitattributes
 ├─ conf/
-│ ├─ config.yaml # top-level defaults + global knobs
-│ ├─ trainer.yaml # Lightning Trainer config
-│ ├─ model/
-│ │ └─ base.yaml
+│ ├─ config.yaml # Hydra defaults / global knobs
+│ ├─ trainer.yaml # Lightning Trainer params
 │ ├─ data/
 │ │ ├─ esc50_debug.yaml
 │ │ └─ generic_folder.yaml
+│ ├─ model/
+│ │ └─ base.yaml # model hyperparams (frontend, tokenizer, tx)
 │ └─ experiment/
-│ ├─ esc50_debug.yaml
+│ ├─ esc50_debug.yaml # end-to-end experiment configs
 │ └─ toy_noise.yaml
+├─ src/
+│ └─ murenn_tx/
+│ ├─ init.py
+│ ├─ train.py # entry point: python -m murenn_tx.train +experiment=...
+│ ├─ modules/
+│ │ ├─ frontend.py # DTCWT + learnable psi bank front-end
+│ │ ├─ tokenizers.py
+│ │ ├─ local_transformer.py
+│ │ ├─ fusion.py
+│ │ └─ model.py # MuReNN-Tx model assembly
+│ └─ lightning/
+│ ├─ datamodule.py # data loading (e.g., ESC-50)
+│ └─ model.py # LightningModule wrapper
 └─ tests/
 ├─ test_smoke.py
 └─ test_shapes.py

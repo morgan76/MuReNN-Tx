@@ -56,23 +56,24 @@ class MuReNNCNN(nn.Module):
         else:
             self.fe = MRFrontEnd(in_channels=1, base_channels=cfg.base_channels, n_scales=cfg.n_scales)
 
+        self.width = getattr(cfg, "cnn_width", 2)
         # assume FE outputs per-scale channel count == cfg.d_model (or map to it)
         self.per_scale = nn.ModuleList([
-            ScaleCNN(in_ch=cfg.base_channels, width=cfg.d_model,
+            ScaleCNN(in_ch=cfg.base_channels, width=self.width,
                      depth=getattr(cfg, "cnn_depth", 3),
                      pool_stride=getattr(cfg, "cnn_pool_stride", 2))
             for _ in range(cfg.n_scales)
         ])
 
         self.fuse = nn.Sequential(
-            nn.LayerNorm(cfg.d_model * cfg.n_scales),
-            nn.Linear(cfg.d_model * cfg.n_scales, cfg.d_model),
+            nn.LayerNorm(self.width * cfg.n_scales),
+            nn.Linear(self.width * cfg.n_scales, cfg.d_model),
             nn.GELU(),
         )
         self.head = nn.Linear(cfg.d_model, cfg.n_classes)
 
         # optional: project FE channels per scale to d_model if needed
-        proj_needed = getattr(cfg, "fe_out_to_d_model", False)
+        proj_needed = getattr(cfg, "fe_out_to_d_model", True)
         if proj_needed:
             self.projects = nn.ModuleList([
                 nn.Conv1d(in_channels=cfg.base_channels,
@@ -88,9 +89,12 @@ class MuReNNCNN(nn.Module):
 
         pooled = []
         for s, x_s in enumerate(pyramid):
+            #print("x_s.shape", x_s.shape)
             if self.projects is not None:
                 x_s = self.projects[s](x_s)
+            #    print("x_s.shape project", x_s.shape)
             per_scale = self.per_scale[s](x_s)
+            #print("per_scale.shape", per_scale.shape)
             pooled.append(per_scale)  # [B, d_model]
         
         h = torch.cat(pooled, dim=1)              # [B, d_model * n_scales]

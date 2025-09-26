@@ -133,7 +133,7 @@ class MelCNN(nn.Module):
     def forward(self, x):  # x: [B,1,T]
         x = self._rms_norm(x)
         S = self._frontend(x)           # [B,1,M,T']
-        S = self.specaug(S)             # no-op at eval
+        #S = self.specaug(S)             # no-op at eval
         z = self.cnn(S)                 # [B, 4W, M', T']
         z = self.pool(z)                # [B, 4W, 1, 1]
         z = self.proj(z)                # [B, d_model]

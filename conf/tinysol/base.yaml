@@ -1,22 +1,24 @@
 # shared across all TinySol runs
 n_classes: 14
-n_scales: 9
+n_scales: 8
 base_channels: 1
 d_model: 32
-nhead: 2
+nhead: 4
 ff_mult: 4
-depth_per_scale: 1
+depth_per_scale: 2
 
 frontend:
   name: murenn
-  stride: 128
-  octaves: [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8]
+  stride: 512
+  octaves: [0, 1, 2, 3, 4, 5, 6, 7]
   Q_multiplier: 16
   include_scale: false
+  sample_rate: 44100
+
 
 # training defaults
 epochs: 1000
-lr: 0.003
+lr: 0.0001
 wd: 0.05
 seed: 1337
 

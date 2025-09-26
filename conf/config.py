@@ -8,13 +8,14 @@ class FrontendCfg:
     octaves: List[int] = field(default_factory=lambda: [0,1,1,2,2,2])
     Q_multiplier: int = 16
     include_scale: bool = False
+    sample_rate: float = 44100
 
 @dataclass
 class DataCfg:
     root: str = "data/ESC-50"
     batch_size: int = 32
     num_workers: int = 4
-    sample_rate: int = 16000
+    sample_rate: int = 44100
     segment_seconds: float = 5.0
     fold: int = 1
 

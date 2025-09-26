@@ -60,7 +60,7 @@ def main():
     ap.add_argument("--devices", default=None)
     ap.add_argument("--precision", default=None)
     ap.add_argument("--accumulate", type=int, default=None)
-    ap.add_argument("--grad_clip", type=float, default=None)
+    ap.add_argument("--grad_clip", type=float, default=1.)
     ap.add_argument("--ckpt", type=str, default=None)
     args = ap.parse_args()
 
@@ -72,7 +72,7 @@ def main():
 
     # build model via registry inside LitClassifier
     model = LitClassifier(cfg, arch=cfg.arch, lr=cfg.lr, wd=cfg.wd)
-    
+
     # build the dataset-specific DataModule via the **datamodule registry**
     datamodule = build_datamodule(args.exp, cfg)
 
